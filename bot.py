@@ -256,12 +256,32 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
     icons = {"Washroom": "🚻", "Smoke": "🚬", "Break": "☕"}
     icon = icons.get(activity_type, "📌")
 
-    late_message = ""
+        late_message = ""
     if activity_type == "Break":
         deadline_dt = datetime.fromisoformat(active["deadline_timestamp"])
         if now > deadline_dt:
             late_str = format_duration(int((now - deadline_dt).total_seconds()))
-            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗"
+            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n(Max allowed: 1 Hour)"
+            data[user_id]["activities"][active_index]["is_late"] = True
+        else:
+            late_message = "\n\n📌 Status:  *ON TIME* ✅"
+            data[user_id]["activities"][active_index]["is_late"] = False
+    elif activity_type == "Washroom":
+        max_seconds = 10 * 60  # 10 minutes
+        if total_seconds > max_seconds:
+            extra_seconds = total_seconds - max_seconds
+            late_str = format_duration(extra_seconds)
+            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n(Max allowed: 10 min)"
+            data[user_id]["activities"][active_index]["is_late"] = True
+        else:
+            late_message = "\n\n📌 Status:  *ON TIME* ✅"
+            data[user_id]["activities"][active_index]["is_late"] = False
+    elif activity_type == "Smoke":
+        max_seconds = 6 * 60  # 6 minutes
+        if total_seconds > max_seconds:
+            extra_seconds = total_seconds - max_seconds
+            late_str = format_duration(extra_seconds)
+            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n(Max allowed: 6 min)"
             data[user_id]["activities"][active_index]["is_late"] = True
         else:
             late_message = "\n\n📌 Status:  *ON TIME* ✅"
