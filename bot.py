@@ -395,13 +395,22 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🔴 Off Work":
         await handle_off_work(update, context)
 
-def main():
-    keep_alive()
+async def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     print("✅ Bot is running...")
-    app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    
+    # Keep running
+    import asyncio
+    await asyncio.Event().wait()
 
+if __name__ == "__main__":
+    keep_alive()
+    import asyncio
+    asyncio.run(main())
 if __name__ == "__main__":
     main()
