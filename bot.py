@@ -8,12 +8,26 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import pytz
 from keep_alive import keep_alive
 
-# ============ SETTINGS ============
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 PAKISTAN_TZ = pytz.timezone("Asia/Karachi")
 DATA_FILE = "user_data.json"
 
-# ============ DATA FUNCTIONS ============
+def escape_markdown(text):
+    if not text:
+        return text
+    text = str(text)
+    escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
+def get_username(user):
+    if user.username:
+        name = f"@{user.username}"
+    else:
+        name = user.first_name or "Unknown"
+    return escape_markdown(name)
+
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
@@ -46,7 +60,7 @@ def get_monthly_stats_text(user_data, now):
     stats = get_monthly_stats(user_data, now)
     month_name = now.strftime("%B %Y")
     return (
-        f"📊 *MONTHLY REPORT ({month_name.upper()})*\n\n"
+        f"📊 *MONTHLY REPORT \\({month_name.upper()}\\)*\n\n"
         f"📆 Total Working Days:  *{stats['total_days']} days*\n\n"
         f"✅ Present Days:  *{stats['present_days']} days*\n\n"
         f"❌ Off Days:  *{stats['off_days']} days*\n\n"
@@ -74,15 +88,22 @@ def get_main_menu():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+async def safe_reply(update, message, reply_markup=None):
+    """Safely reply with markdown, fallback to plain text if error"""
+    try:
+        await update.message.reply_text(text=message, parse_mode="Markdown", reply_markup=reply_markup)
+    except Exception as e:
+        # Remove markdown if parse error
+        plain_message = message.replace("*", "").replace("_", "").replace("\\", "")
+        await update.message.reply_text(text=plain_message, reply_markup=reply_markup)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🏢 *EMPLOYEE ATTENDANCE SYSTEM*\n\n👋 Welcome! Please select an action from the buttons below.",
-        reply_markup=get_main_menu(), parse_mode="Markdown"
-    )
+    message = "🏢 *EMPLOYEE ATTENDANCE SYSTEM*\n\n👋 Welcome\\! Please select an action from the buttons below\\."
+    await safe_reply(update, message, get_main_menu())
 
 async def handle_start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    username = f"@{user.username}" if user.username else user.first_name
+    username = get_username(user)
     user_id = str(user.id)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
@@ -91,7 +112,7 @@ async def handle_start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if day_name == "Sunday":
         scheduled_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
-        shift_type = "Half Day (Sunday)"
+        shift_type = "Half Day \\(Sunday\\)"
         scheduled_str = "04:00:00 PM"
     else:
         scheduled_time = now.replace(hour=10, minute=0, second=0, microsecond=0)
@@ -104,12 +125,12 @@ async def handle_start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     today_records = [r for r in data[user_id]["attendance"] if r["date"] == current_date]
     if today_records:
-        await update.message.reply_text(
-            f"⚠️ *ALREADY AT WORK!*\n\n👤 User:  {username}\n\n❌ You are *already in work!*\n\n"
+        message = (
+            f"⚠️ *ALREADY AT WORK\\!*\n\n👤 User:  {username}\n\n❌ You are *already in work\\!*\n\n"
             f"📅 Date:  *{current_date}*\n\n⏰ Started At:  *{today_records[0]['start_time']}*\n\n"
-            f"🔔 Please press  *🔴 Off Work*  first to end your shift.",
-            parse_mode="Markdown", reply_markup=get_main_menu()
+            f"🔔 Please press  *🔴 Off Work*  first to end your shift\\."
         )
+        await safe_reply(update, message, get_main_menu())
         return
 
     is_late = now > scheduled_time
@@ -134,11 +155,11 @@ async def handle_start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     monthly_text = get_monthly_stats_text(data[user_id], now)
 
     message = (
-        f"🟢 *WORK STARTED* 🟢\n\n👤 User:  {username}\n\n📅 Date:  *{current_date}*  ({day_name})\n\n"
+        f"🟢 *WORK STARTED* 🟢\n\n👤 User:  {username}\n\n📅 Date:  *{current_date}*  \\({day_name}\\)\n\n"
         f"⏰ Time:  *{current_time}*\n\n📌 Shift:  *{shift_type}*\n\n📌 Status:  *{status}*"
         f"{late_message}\n\n━━━━━━━━━━━━━━━━━━\n\n{monthly_text}"
     )
-    await update.message.reply_text(text=message, parse_mode="Markdown", reply_markup=get_main_menu())
+    await safe_reply(update, message, get_main_menu())
 
 def check_work_started(data, user_id, current_date):
     if user_id not in data:
@@ -147,7 +168,7 @@ def check_work_started(data, user_id, current_date):
 
 async def handle_activity(update, context, activity_name, icon):
     user = update.message.from_user
-    username = f"@{user.username}" if user.username else user.first_name
+    username = get_username(user)
     user_id = str(user.id)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
@@ -155,21 +176,21 @@ async def handle_activity(update, context, activity_name, icon):
     data = load_data()
 
     if not check_work_started(data, user_id, current_date):
-        await update.message.reply_text(
-            f"⚠️ *ACTION DENIED!*\n\n👤 User:  {username}\n\n❌ You have *not started work yet!*\n\n"
-            f"🔔 Please press  *🟢 Start Work*  first.",
-            parse_mode="Markdown", reply_markup=get_main_menu()
+        message = (
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n❌ You have *not started work yet\\!*\n\n"
+            f"🔔 Please press  *🟢 Start Work*  first\\."
         )
+        await safe_reply(update, message, get_main_menu())
         return
 
     active = [a for a in data[user_id].get("activities", []) if a["date"] == current_date and a.get("end_time") is None]
     if active:
-        await update.message.reply_text(
-            f"⚠️ *ACTION DENIED!*\n\n👤 User:  {username}\n\n"
-            f"❌ You are *already engaged in {active[0]['type']}* activity!\n\n"
-            f"🔔 Please press  *💺 Back to Seat*  first.",
-            parse_mode="Markdown", reply_markup=get_main_menu()
+        message = (
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n"
+            f"❌ You are *already engaged in {active[0]['type']}* activity\\!\n\n"
+            f"🔔 Please press  *💺 Back to Seat*  first\\."
         )
+        await safe_reply(update, message, get_main_menu())
         return
 
     activity = {
@@ -191,25 +212,25 @@ async def handle_activity(update, context, activity_name, icon):
             f"☕ *BREAK STARTED*\n\n👤 User:  {username}\n\n📅 Date:  *{current_date}*\n\n"
             f"⏰ Break Start:  *{current_time}*\n\n⏳ Break Duration:  *1 Hour*\n\n"
             f"⏰ You must be back by:  *03:00:00 PM*\n\n"
-            f"🔔 Please press  *💺 Back to Seat*  when you return."
+            f"🔔 Please press  *💺 Back to Seat*  when you return\\."
         )
     elif activity_name == "Washroom":
         message = (
             f"{icon} *WASHROOM BREAK*\n\n👤 User:  {username}\n\n"
             f"📅 Date:  *{current_date}*\n\n⏰ Time:  *{current_time}*\n\n"
-            f"✅ Washroom break  *registered!*\n\n🔓 You have *permission to go.*\n\n"
+            f"✅ Washroom break  *registered\\!*\n\n🔓 You have *permission to go\\.*\n\n"
             f"⏳ Max Allowed Time:  *10 minutes*\n\n"
-            f"🔔 Please press  *💺 Back to Seat*  when you return."
+            f"🔔 Please press  *💺 Back to Seat*  when you return\\."
         )
     elif activity_name == "Smoke":
         message = (
             f"{icon} *SMOKE BREAK*\n\n👤 User:  {username}\n\n"
             f"📅 Date:  *{current_date}*\n\n⏰ Time:  *{current_time}*\n\n"
-            f"✅ Smoke break  *registered!*\n\n🔓 You have *permission to go.*\n\n"
+            f"✅ Smoke break  *registered\\!*\n\n🔓 You have *permission to go\\.*\n\n"
             f"⏳ Max Allowed Time:  *6 minutes*\n\n"
-            f"🔔 Please press  *💺 Back to Seat*  when you return."
+            f"🔔 Please press  *💺 Back to Seat*  when you return\\."
         )
-    await update.message.reply_text(text=message, parse_mode="Markdown", reply_markup=get_main_menu())
+    await safe_reply(update, message, get_main_menu())
 
 async def handle_washroom(update, context):
     await handle_activity(update, context, "Washroom", "🚻")
@@ -222,7 +243,7 @@ async def handle_break(update, context):
 
 async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    username = f"@{user.username}" if user.username else user.first_name
+    username = get_username(user)
     user_id = str(user.id)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
@@ -230,11 +251,11 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
     data = load_data()
 
     if not check_work_started(data, user_id, current_date):
-        await update.message.reply_text(
-            f"⚠️ *ACTION DENIED!*\n\n👤 User:  {username}\n\n❌ You have *not started work yet!*\n\n"
-            f"🔔 Please press  *🟢 Start Work*  first.",
-            parse_mode="Markdown", reply_markup=get_main_menu()
+        message = (
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n❌ You have *not started work yet\\!*\n\n"
+            f"🔔 Please press  *🟢 Start Work*  first\\."
         )
+        await safe_reply(update, message, get_main_menu())
         return
 
     active = None
@@ -246,11 +267,11 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
             break
 
     if not active:
-        await update.message.reply_text(
-            f"⚠️ *ACTION DENIED!*\n\n👤 User:  {username}\n\n❌ You are *not engaged in any activity!*\n\n"
-            f"🔔 No active  *Washroom / Smoke / Break*  found.",
-            parse_mode="Markdown", reply_markup=get_main_menu()
+        message = (
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n❌ You are *not engaged in any activity\\!*\n\n"
+            f"🔔 No active  *Washroom / Smoke / Break*  found\\."
         )
+        await safe_reply(update, message, get_main_menu())
         return
 
     start_dt = datetime.fromisoformat(active["start_timestamp"])
@@ -270,7 +291,7 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
         deadline_dt = datetime.fromisoformat(active["deadline_timestamp"])
         if now > deadline_dt:
             late_str = format_duration(int((now - deadline_dt).total_seconds()))
-            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n(Max allowed: 1 Hour)"
+            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n\\(Max allowed: 1 Hour\\)"
             data[user_id]["activities"][active_index]["is_late"] = True
         else:
             late_message = "\n\n📌 Status:  *ON TIME* ✅"
@@ -280,7 +301,7 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
         if total_seconds > max_seconds:
             extra_seconds = total_seconds - max_seconds
             late_str = format_duration(extra_seconds)
-            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n(Max allowed: 10 min)"
+            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n\\(Max allowed: 10 min\\)"
             data[user_id]["activities"][active_index]["is_late"] = True
         else:
             late_message = "\n\n📌 Status:  *ON TIME* ✅"
@@ -290,7 +311,7 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
         if total_seconds > max_seconds:
             extra_seconds = total_seconds - max_seconds
             late_str = format_duration(extra_seconds)
-            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n(Max allowed: 6 min)"
+            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n\\(Max allowed: 6 min\\)"
             data[user_id]["activities"][active_index]["is_late"] = True
         else:
             late_message = "\n\n📌 Status:  *ON TIME* ✅"
@@ -301,13 +322,13 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"💺 *BACK TO SEAT*\n\n👤 User:  {username}\n\n📅 Date:  *{current_date}*\n\n"
         f"⏰ Return Time:  *{current_time}*\n\n{icon} Activity:  *{activity_type}*\n\n"
         f"⏰ Gone At:  *{active['start_time']}*\n\n⏰ Back At:  *{current_time}*\n\n"
-        f"⏳ Time Spent:  *{duration_str}*{late_message}\n\n✅ *Welcome back to work!*"
+        f"⏳ Time Spent:  *{duration_str}*{late_message}\n\n✅ *Welcome back to work\\!*"
     )
-    await update.message.reply_text(text=message, parse_mode="Markdown", reply_markup=get_main_menu())
+    await safe_reply(update, message, get_main_menu())
 
 async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    username = f"@{user.username}" if user.username else user.first_name
+    username = get_username(user)
     user_id = str(user.id)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
@@ -316,11 +337,11 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
 
     if not check_work_started(data, user_id, current_date):
-        await update.message.reply_text(
-            f"⚠️ *ACTION DENIED!*\n\n👤 User:  {username}\n\n❌ You have *not started work yet!*\n\n"
-            f"🔔 Please press  *🟢 Start Work*  first.",
-            parse_mode="Markdown", reply_markup=get_main_menu()
+        message = (
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n❌ You have *not started work yet\\!*\n\n"
+            f"🔔 Please press  *🟢 Start Work*  first\\."
         )
+        await safe_reply(update, message, get_main_menu())
         return
 
     today_attendance = None
@@ -362,7 +383,7 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for i, a in enumerate(activities):
             dur_str = format_duration(a.get("duration", 0))
             late_mark = " ❗" if a.get("is_late", False) else ""
-            text += f"   {i+1}.  *{a['start_time']}*  -  *{a['end_time']}*  ({dur_str}){late_mark}\n"
+            text += f"   {i+1}\\.  *{a['start_time']}*  \\-  *{a['end_time']}*  \\({dur_str}\\){late_mark}\n"
         return text
 
     total_washroom = sum(a.get("duration", 0) for a in washroom_list)
@@ -386,7 +407,7 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if break_list:
         break_status = "LATE ❗" if break_list[0].get("is_late", False) else "ON TIME ✅"
-        break_text = f"☕ *Break:*  *{break_list[0]['start_time']}*  -  *{break_list[0]['end_time']}*\n\n   ⏳ Total Break Time:  *{format_duration(total_break)}*\n\n   📌 Status:  *{break_status}*"
+        break_text = f"☕ *Break:*  *{break_list[0]['start_time']}*  \\-  *{break_list[0]['end_time']}*\n\n   ⏳ Total Break Time:  *{format_duration(total_break)}*\n\n   📌 Status:  *{break_status}*"
     else:
         break_text = f"☕ *Break:*  Not taken"
 
@@ -394,8 +415,8 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     monthly_text = get_monthly_stats_text(data[user_id], now)
 
     message = (
-        f"🔴 *OFF WORK - DAY COMPLETE*\n\n👤 User:  {username}\n\n"
-        f"📅 Date:  *{current_date}*  ({day_name})\n\n⏰ Work Started:  *{today_attendance['start_time']}*\n\n"
+        f"🔴 *OFF WORK \\- DAY COMPLETE*\n\n👤 User:  {username}\n\n"
+        f"📅 Date:  *{current_date}*  \\({day_name}\\)\n\n⏰ Work Started:  *{today_attendance['start_time']}*\n\n"
         f"⏰ Work Ended:  *{current_time}*\n\n📌 Start Status:  *{today_attendance['status']}*"
         f"{off_status}\n\n━━━━━━━━━━━━━━━━━━\n\n📊 *FULL DAY PROGRESS REPORT*\n\n"
         f"━━━━━━━━━━━━━━━━━━\n\n{washroom_text}\n\n{smoke_text}\n\n{break_text}\n\n"
@@ -408,7 +429,7 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏳ Total Free Time:  *{format_duration(total_free)}*\n\n"
         f"━━━━━━━━━━━━━━━━━━\n\n{monthly_text}"
     )
-    await update.message.reply_text(text=message, parse_mode="Markdown", reply_markup=get_main_menu())
+    await safe_reply(update, message, get_main_menu())
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
