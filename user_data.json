@@ -1,0 +1,50 @@
+{
+    "8780030899": {
+        "username": "@Meshahji121",
+        "attendance": [
+            {
+                "date": "2026-06-04",
+                "day": "Thursday",
+                "start_time": "02:38:42 PM",
+                "start_timestamp": "2026-06-04T14:38:42.694284+05:00",
+                "status": "LATE \u2757",
+                "is_late": true,
+                "shift_type": "Full Day",
+                "end_time": "02:39:41 PM",
+                "end_timestamp": "2026-06-04T14:39:41.536280+05:00"
+            }
+        ],
+        "activities": [
+            {
+                "date": "2026-06-04",
+                "type": "Washroom",
+                "start_time": "02:38:51 PM",
+                "start_timestamp": "2026-06-04T14:38:51.581728+05:00",
+                "end_time": "02:39:02 PM",
+                "end_timestamp": "2026-06-04T14:39:02.559187+05:00",
+                "duration": 10
+            },
+            {
+                "date": "2026-06-04",
+                "type": "Smoke",
+                "start_time": "02:39:17 PM",
+                "start_timestamp": "2026-06-04T14:39:17.473655+05:00",
+                "end_time": "02:39:30 PM",
+                "end_timestamp": "2026-06-04T14:39:30.990868+05:00",
+                "duration": 13
+            },
+            {
+                "date": "2026-06-04",
+                "type": "Break",
+                "start_time": "02:39:34 PM",
+                "start_timestamp": "2026-06-04T14:39:34.428472+05:00",
+                "end_time": "02:39:39 PM",
+                "end_timestamp": "2026-06-04T14:39:39.458723+05:00",
+                "duration": 5,
+                "deadline": "03:00:00 PM",
+                "deadline_timestamp": "2026-06-04T15:00:00+05:00",
+                "is_late": false
+            }
+        ]
+    }
+}
