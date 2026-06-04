@@ -3,7 +3,7 @@ import os
 import calendar
 import asyncio
 from datetime import datetime, timedelta
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import pytz
 from keep_alive import keep_alive
@@ -21,13 +21,6 @@ def escape_markdown(text):
         text = text.replace(char, f'\\{char}')
     return text
 
-def get_username(user):
-    if user.username:
-        name = f"@{user.username}"
-    else:
-        name = user.first_name or "Unknown"
-    return escape_markdown(name)
-
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
@@ -43,6 +36,19 @@ def get_now():
 
 def get_total_days_in_month(now):
     return calendar.monthrange(now.year, now.month)[1]
+
+def is_pc_taken(data, pc_number, current_user_id):
+    """Check if PC number is already registered by another user"""
+    for uid, udata in data.items():
+        if uid != current_user_id and udata.get("pc_number", "").upper() == pc_number.upper():
+            return True
+    return False
+
+def get_user_pc(data, user_id):
+    """Get user's registered PC number"""
+    if user_id in data:
+        return data[user_id].get("pc_number")
+    return None
 
 def get_monthly_stats(user_data, now):
     current_month = now.strftime("%Y-%m")
@@ -89,22 +95,114 @@ def get_main_menu():
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 async def safe_reply(update, message, reply_markup=None):
-    """Safely reply with markdown, fallback to plain text if error"""
     try:
         await update.message.reply_text(text=message, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception as e:
-        # Remove markdown if parse error
         plain_message = message.replace("*", "").replace("_", "").replace("\\", "")
         await update.message.reply_text(text=plain_message, reply_markup=reply_markup)
 
+# ============ /start COMMAND ============
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = "🏢 *EMPLOYEE ATTENDANCE SYSTEM*\n\n👋 Welcome\\! Please select an action from the buttons below\\."
+    user = update.message.from_user
+    user_id = str(user.id)
+    data = load_data()
+    
+    # Check if user is already registered
+    pc_number = get_user_pc(data, user_id)
+    
+    if pc_number:
+        # Already registered - show buttons
+        message = (
+            f"🏢 *EMPLOYEE ATTENDANCE SYSTEM*\n\n"
+            f"👋 Welcome back\\!\n\n"
+            f"🔢 Your PC:  *{escape_markdown(pc_number)}*\n\n"
+            f"Please select an action from the buttons below\\."
+        )
+        await safe_reply(update, message, get_main_menu())
+    else:
+        # New user - ask for PC number
+        context.user_data["awaiting_pc"] = True
+        message = (
+            f"🏢 *EMPLOYEE ATTENDANCE SYSTEM*\n\n"
+            f"👋 Welcome\\!\n\n"
+            f"🔢 Please enter your *PC Number* to register\\.\n\n"
+            f"Example:  PC01, PC02, A06, A07\n\n"
+            f"⌨️ Type your PC number and send\\."
+        )
+        await update.message.reply_text(
+            message,
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardRemove()
+        )
+
+# ============ PC REGISTRATION ============
+async def handle_pc_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+    user_id = str(user.id)
+    pc_number = update.message.text.strip().upper()
+    data = load_data()
+    
+    # Validate PC number (basic check)
+    if len(pc_number) < 2 or len(pc_number) > 15:
+        message = (
+            f"⚠️ *INVALID PC NUMBER\\!*\n\n"
+            f"❌ PC Number must be between 2 to 15 characters\\.\n\n"
+            f"🔢 Please enter a valid PC Number:\n\n"
+            f"Example:  PC01, PC02, A06"
+        )
+        await safe_reply(update, message)
+        return
+    
+    # Check if PC is already taken
+    if is_pc_taken(data, pc_number, user_id):
+        message = (
+            f"⚠️ *PC NUMBER ALREADY TAKEN\\!*\n\n"
+            f"❌ PC Number  *{escape_markdown(pc_number)}*  is already registered by another user\\.\n\n"
+            f"🔢 Please enter a different PC Number:"
+        )
+        await safe_reply(update, message)
+        return
+    
+    # Register user
+    if user_id not in data:
+        data[user_id] = {
+            "pc_number": pc_number,
+            "telegram_username": user.username or user.first_name,
+            "attendance": [],
+            "activities": []
+        }
+    else:
+        data[user_id]["pc_number"] = pc_number
+    
+    save_data(data)
+    context.user_data["awaiting_pc"] = False
+    
+    now = get_now()
+    current_date = now.strftime("%Y-%m-%d")
+    current_time = now.strftime("%I:%M:%S %p")
+    
+    message = (
+        f"✅ *REGISTRATION SUCCESSFUL\\!*\n\n"
+        f"👤 PC Number:  *{escape_markdown(pc_number)}*\n\n"
+        f"📅 Date:  *{current_date}*\n\n"
+        f"⏰ Time:  *{current_time}*\n\n"
+        f"🎉 You are now registered\\!\n\n"
+        f"📌 Use the buttons below to track your activities\\."
+    )
     await safe_reply(update, message, get_main_menu())
 
+# ============ START WORK ============
 async def handle_start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    username = get_username(user)
     user_id = str(user.id)
+    data = load_data()
+    
+    pc_number = get_user_pc(data, user_id)
+    if not pc_number:
+        await ask_registration(update, context)
+        return
+    
+    pc_display = escape_markdown(pc_number)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
     current_date = now.strftime("%Y-%m-%d")
@@ -119,14 +217,10 @@ async def handle_start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
         shift_type = "Full Day"
         scheduled_str = "10:00:00 AM"
 
-    data = load_data()
-    if user_id not in data:
-        data[user_id] = {"username": username, "attendance": [], "activities": []}
-
     today_records = [r for r in data[user_id]["attendance"] if r["date"] == current_date]
     if today_records:
         message = (
-            f"⚠️ *ALREADY AT WORK\\!*\n\n👤 User:  {username}\n\n❌ You are *already in work\\!*\n\n"
+            f"⚠️ *ALREADY AT WORK\\!*\n\n👤 PC:  *{pc_display}*\n\n❌ You are *already in work\\!*\n\n"
             f"📅 Date:  *{current_date}*\n\n⏰ Started At:  *{today_records[0]['start_time']}*\n\n"
             f"🔔 Please press  *🔴 Off Work*  first to end your shift\\."
         )
@@ -155,11 +249,26 @@ async def handle_start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     monthly_text = get_monthly_stats_text(data[user_id], now)
 
     message = (
-        f"🟢 *WORK STARTED* 🟢\n\n👤 User:  {username}\n\n📅 Date:  *{current_date}*  \\({day_name}\\)\n\n"
+        f"🟢 *WORK STARTED* 🟢\n\n👤 PC:  *{pc_display}*\n\n📅 Date:  *{current_date}*  \\({day_name}\\)\n\n"
         f"⏰ Time:  *{current_time}*\n\n📌 Shift:  *{shift_type}*\n\n📌 Status:  *{status}*"
         f"{late_message}\n\n━━━━━━━━━━━━━━━━━━\n\n{monthly_text}"
     )
     await safe_reply(update, message, get_main_menu())
+
+async def ask_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ask user to register if not registered"""
+    context.user_data["awaiting_pc"] = True
+    message = (
+        f"⚠️ *NOT REGISTERED\\!*\n\n"
+        f"❌ You are not registered yet\\.\n\n"
+        f"🔢 Please enter your *PC Number* to register:\n\n"
+        f"Example:  PC01, PC02, A06"
+    )
+    await update.message.reply_text(
+        message,
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 def check_work_started(data, user_id, current_date):
     if user_id not in data:
@@ -168,16 +277,22 @@ def check_work_started(data, user_id, current_date):
 
 async def handle_activity(update, context, activity_name, icon):
     user = update.message.from_user
-    username = get_username(user)
     user_id = str(user.id)
+    data = load_data()
+    
+    pc_number = get_user_pc(data, user_id)
+    if not pc_number:
+        await ask_registration(update, context)
+        return
+    
+    pc_display = escape_markdown(pc_number)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
     current_date = now.strftime("%Y-%m-%d")
-    data = load_data()
 
     if not check_work_started(data, user_id, current_date):
         message = (
-            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n❌ You have *not started work yet\\!*\n\n"
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 PC:  *{pc_display}*\n\n❌ You have *not started work yet\\!*\n\n"
             f"🔔 Please press  *🟢 Start Work*  first\\."
         )
         await safe_reply(update, message, get_main_menu())
@@ -186,7 +301,7 @@ async def handle_activity(update, context, activity_name, icon):
     active = [a for a in data[user_id].get("activities", []) if a["date"] == current_date and a.get("end_time") is None]
     if active:
         message = (
-            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n"
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 PC:  *{pc_display}*\n\n"
             f"❌ You are *already engaged in {active[0]['type']}* activity\\!\n\n"
             f"🔔 Please press  *💺 Back to Seat*  first\\."
         )
@@ -209,14 +324,14 @@ async def handle_activity(update, context, activity_name, icon):
 
     if activity_name == "Break":
         message = (
-            f"☕ *BREAK STARTED*\n\n👤 User:  {username}\n\n📅 Date:  *{current_date}*\n\n"
+            f"☕ *BREAK STARTED*\n\n👤 PC:  *{pc_display}*\n\n📅 Date:  *{current_date}*\n\n"
             f"⏰ Break Start:  *{current_time}*\n\n⏳ Break Duration:  *1 Hour*\n\n"
             f"⏰ You must be back by:  *03:00:00 PM*\n\n"
             f"🔔 Please press  *💺 Back to Seat*  when you return\\."
         )
     elif activity_name == "Washroom":
         message = (
-            f"{icon} *WASHROOM BREAK*\n\n👤 User:  {username}\n\n"
+            f"{icon} *WASHROOM BREAK*\n\n👤 PC:  *{pc_display}*\n\n"
             f"📅 Date:  *{current_date}*\n\n⏰ Time:  *{current_time}*\n\n"
             f"✅ Washroom break  *registered\\!*\n\n🔓 You have *permission to go\\.*\n\n"
             f"⏳ Max Allowed Time:  *10 minutes*\n\n"
@@ -224,7 +339,7 @@ async def handle_activity(update, context, activity_name, icon):
         )
     elif activity_name == "Smoke":
         message = (
-            f"{icon} *SMOKE BREAK*\n\n👤 User:  {username}\n\n"
+            f"{icon} *SMOKE BREAK*\n\n👤 PC:  *{pc_display}*\n\n"
             f"📅 Date:  *{current_date}*\n\n⏰ Time:  *{current_time}*\n\n"
             f"✅ Smoke break  *registered\\!*\n\n🔓 You have *permission to go\\.*\n\n"
             f"⏳ Max Allowed Time:  *6 minutes*\n\n"
@@ -243,16 +358,22 @@ async def handle_break(update, context):
 
 async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    username = get_username(user)
     user_id = str(user.id)
+    data = load_data()
+    
+    pc_number = get_user_pc(data, user_id)
+    if not pc_number:
+        await ask_registration(update, context)
+        return
+    
+    pc_display = escape_markdown(pc_number)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
     current_date = now.strftime("%Y-%m-%d")
-    data = load_data()
 
     if not check_work_started(data, user_id, current_date):
         message = (
-            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n❌ You have *not started work yet\\!*\n\n"
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 PC:  *{pc_display}*\n\n❌ You have *not started work yet\\!*\n\n"
             f"🔔 Please press  *🟢 Start Work*  first\\."
         )
         await safe_reply(update, message, get_main_menu())
@@ -268,7 +389,7 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if not active:
         message = (
-            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n❌ You are *not engaged in any activity\\!*\n\n"
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 PC:  *{pc_display}*\n\n❌ You are *not engaged in any activity\\!*\n\n"
             f"🔔 No active  *Washroom / Smoke / Break*  found\\."
         )
         await safe_reply(update, message, get_main_menu())
@@ -319,7 +440,7 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     save_data(data)
     message = (
-        f"💺 *BACK TO SEAT*\n\n👤 User:  {username}\n\n📅 Date:  *{current_date}*\n\n"
+        f"💺 *BACK TO SEAT*\n\n👤 PC:  *{pc_display}*\n\n📅 Date:  *{current_date}*\n\n"
         f"⏰ Return Time:  *{current_time}*\n\n{icon} Activity:  *{activity_type}*\n\n"
         f"⏰ Gone At:  *{active['start_time']}*\n\n⏰ Back At:  *{current_time}*\n\n"
         f"⏳ Time Spent:  *{duration_str}*{late_message}\n\n✅ *Welcome back to work\\!*"
@@ -328,17 +449,23 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    username = get_username(user)
     user_id = str(user.id)
+    data = load_data()
+    
+    pc_number = get_user_pc(data, user_id)
+    if not pc_number:
+        await ask_registration(update, context)
+        return
+    
+    pc_display = escape_markdown(pc_number)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
     current_date = now.strftime("%Y-%m-%d")
     day_name = now.strftime("%A")
-    data = load_data()
 
     if not check_work_started(data, user_id, current_date):
         message = (
-            f"⚠️ *ACTION DENIED\\!*\n\n👤 User:  {username}\n\n❌ You have *not started work yet\\!*\n\n"
+            f"⚠️ *ACTION DENIED\\!*\n\n👤 PC:  *{pc_display}*\n\n❌ You have *not started work yet\\!*\n\n"
             f"🔔 Please press  *🟢 Start Work*  first\\."
         )
         await safe_reply(update, message, get_main_menu())
@@ -415,7 +542,7 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     monthly_text = get_monthly_stats_text(data[user_id], now)
 
     message = (
-        f"🔴 *OFF WORK \\- DAY COMPLETE*\n\n👤 User:  {username}\n\n"
+        f"🔴 *OFF WORK \\- DAY COMPLETE*\n\n👤 PC:  *{pc_display}*\n\n"
         f"📅 Date:  *{current_date}*  \\({day_name}\\)\n\n⏰ Work Started:  *{today_attendance['start_time']}*\n\n"
         f"⏰ Work Ended:  *{current_time}*\n\n📌 Start Status:  *{today_attendance['status']}*"
         f"{off_status}\n\n━━━━━━━━━━━━━━━━━━\n\n📊 *FULL DAY PROGRESS REPORT*\n\n"
@@ -431,8 +558,32 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await safe_reply(update, message, get_main_menu())
 
+# ============ MESSAGE HANDLER ============
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    user_id = str(update.message.from_user.id)
+    data = load_data()
+    
+    # Check if user is awaiting PC registration
+    if context.user_data.get("awaiting_pc", False):
+        # Don't process button clicks as PC numbers
+        if text in ["🟢 Start Work", "🚻 Washroom", "🚬 Smoke", "☕ Break", "💺 Back to Seat", "🔴 Off Work"]:
+            await handle_pc_registration_redirect(update, context)
+            return
+        await handle_pc_registration(update, context)
+        return
+    
+    # Check if user is not registered and clicks a button
+    if get_user_pc(data, user_id) is None:
+        if text in ["🟢 Start Work", "🚻 Washroom", "🚬 Smoke", "☕ Break", "💺 Back to Seat", "🔴 Off Work"]:
+            await ask_registration(update, context)
+            return
+        else:
+            # User typed something - treat as PC number
+            await handle_pc_registration(update, context)
+            return
+    
+    # Normal button handling
     if text == "🟢 Start Work":
         await handle_start_work(update, context)
     elif text == "🚻 Washroom":
@@ -445,6 +596,18 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_back_to_seat(update, context)
     elif text == "🔴 Off Work":
         await handle_off_work(update, context)
+
+async def handle_pc_registration_redirect(update, context):
+    message = (
+        f"⚠️ *PLEASE ENTER PC NUMBER FIRST\\!*\n\n"
+        f"🔢 Type your PC Number to register\\.\n\n"
+        f"Example:  PC01, PC02, A06"
+    )
+    await update.message.reply_text(
+        message,
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
