@@ -145,7 +145,7 @@ def check_work_started(data, user_id, current_date):
         return False
     return len([r for r in data[user_id].get("attendance", []) if r["date"] == current_date]) > 0
 
-async def handle_activity(update, context, activity_name, icon, extra_info=""):
+async def handle_activity(update, context, activity_name, icon):
     user = update.message.from_user
     username = f"@{user.username}" if user.username else user.first_name
     user_id = str(user.id)
@@ -193,11 +193,20 @@ async def handle_activity(update, context, activity_name, icon, extra_info=""):
             f"⏰ You must be back by:  *03:00:00 PM*\n\n"
             f"🔔 Please press  *💺 Back to Seat*  when you return."
         )
-    else:
+    elif activity_name == "Washroom":
         message = (
-            f"{icon} *{activity_name.upper()} BREAK*\n\n👤 User:  {username}\n\n"
+            f"{icon} *WASHROOM BREAK*\n\n👤 User:  {username}\n\n"
             f"📅 Date:  *{current_date}*\n\n⏰ Time:  *{current_time}*\n\n"
-            f"✅ {activity_name} break  *registered!*\n\n🔓 You have *permission to go.*\n\n"
+            f"✅ Washroom break  *registered!*\n\n🔓 You have *permission to go.*\n\n"
+            f"⏳ Max Allowed Time:  *10 minutes*\n\n"
+            f"🔔 Please press  *💺 Back to Seat*  when you return."
+        )
+    elif activity_name == "Smoke":
+        message = (
+            f"{icon} *SMOKE BREAK*\n\n👤 User:  {username}\n\n"
+            f"📅 Date:  *{current_date}*\n\n⏰ Time:  *{current_time}*\n\n"
+            f"✅ Smoke break  *registered!*\n\n🔓 You have *permission to go.*\n\n"
+            f"⏳ Max Allowed Time:  *6 minutes*\n\n"
             f"🔔 Please press  *💺 Back to Seat*  when you return."
         )
     await update.message.reply_text(text=message, parse_mode="Markdown", reply_markup=get_main_menu())
@@ -256,7 +265,7 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
     icons = {"Washroom": "🚻", "Smoke": "🚬", "Break": "☕"}
     icon = icons.get(activity_type, "📌")
 
-        late_message = ""
+    late_message = ""
     if activity_type == "Break":
         deadline_dt = datetime.fromisoformat(active["deadline_timestamp"])
         if now > deadline_dt:
@@ -267,7 +276,7 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
             late_message = "\n\n📌 Status:  *ON TIME* ✅"
             data[user_id]["activities"][active_index]["is_late"] = False
     elif activity_type == "Washroom":
-        max_seconds = 10 * 60  # 10 minutes
+        max_seconds = 10 * 60
         if total_seconds > max_seconds:
             extra_seconds = total_seconds - max_seconds
             late_str = format_duration(extra_seconds)
@@ -277,7 +286,7 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
             late_message = "\n\n📌 Status:  *ON TIME* ✅"
             data[user_id]["activities"][active_index]["is_late"] = False
     elif activity_type == "Smoke":
-        max_seconds = 6 * 60  # 6 minutes
+        max_seconds = 6 * 60
         if total_seconds > max_seconds:
             extra_seconds = total_seconds - max_seconds
             late_str = format_duration(extra_seconds)
@@ -352,7 +361,8 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = ""
         for i, a in enumerate(activities):
             dur_str = format_duration(a.get("duration", 0))
-            text += f"   {i+1}.  *{a['start_time']}*  -  *{a['end_time']}*  ({dur_str})\n"
+            late_mark = " ❗" if a.get("is_late", False) else ""
+            text += f"   {i+1}.  *{a['start_time']}*  -  *{a['end_time']}*  ({dur_str}){late_mark}\n"
         return text
 
     total_washroom = sum(a.get("duration", 0) for a in washroom_list)
@@ -423,14 +433,8 @@ async def main():
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-    
-    # Keep running
-    import asyncio
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
     keep_alive()
-    import asyncio
     asyncio.run(main())
-if __name__ == "__main__":
-    main()
