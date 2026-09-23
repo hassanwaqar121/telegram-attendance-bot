@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import pytz
 from keep_alive import keep_alive
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8745746789:AAGXMpIU-sv1euTbybuEwpQW_v177zTmzn8")
 PAKISTAN_TZ = pytz.timezone("Asia/Karachi")
 DATA_FILE = "user_data.json"
 
@@ -106,10 +106,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     user_id = str(user.id)
     data = load_data()
-    
+
     # Check if user is already registered
     pc_number = get_user_pc(data, user_id)
-    
+
     if pc_number:
         # Already registered - show buttons
         message = (
@@ -141,7 +141,7 @@ async def handle_pc_registration(update: Update, context: ContextTypes.DEFAULT_T
     user_id = str(user.id)
     pc_number = update.message.text.strip().upper()
     data = load_data()
-    
+
     # Validate PC number (basic check)
     if len(pc_number) < 2 or len(pc_number) > 15:
         message = (
@@ -152,7 +152,7 @@ async def handle_pc_registration(update: Update, context: ContextTypes.DEFAULT_T
         )
         await safe_reply(update, message)
         return
-    
+
     # Check if PC is already taken
     if is_pc_taken(data, pc_number, user_id):
         message = (
@@ -162,7 +162,7 @@ async def handle_pc_registration(update: Update, context: ContextTypes.DEFAULT_T
         )
         await safe_reply(update, message)
         return
-    
+
     # Register user
     if user_id not in data:
         data[user_id] = {
@@ -173,14 +173,14 @@ async def handle_pc_registration(update: Update, context: ContextTypes.DEFAULT_T
         }
     else:
         data[user_id]["pc_number"] = pc_number
-    
+
     save_data(data)
     context.user_data["awaiting_pc"] = False
-    
+
     now = get_now()
     current_date = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%I:%M:%S %p")
-    
+
     message = (
         f"✅ *REGISTRATION SUCCESSFUL\\!*\n\n"
         f"👤 PC Number:  *{escape_markdown(pc_number)}*\n\n"
@@ -196,12 +196,12 @@ async def handle_start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     user_id = str(user.id)
     data = load_data()
-    
+
     pc_number = get_user_pc(data, user_id)
     if not pc_number:
         await ask_registration(update, context)
         return
-    
+
     pc_display = escape_markdown(pc_number)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
@@ -227,6 +227,7 @@ async def handle_start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update, message, get_main_menu())
         return
 
+    # Any punch after scheduled time — even by 1 second — counts as late
     is_late = now > scheduled_time
     late_message = ""
     if is_late:
@@ -279,12 +280,12 @@ async def handle_activity(update, context, activity_name, icon):
     user = update.message.from_user
     user_id = str(user.id)
     data = load_data()
-    
+
     pc_number = get_user_pc(data, user_id)
     if not pc_number:
         await ask_registration(update, context)
         return
-    
+
     pc_display = escape_markdown(pc_number)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
@@ -313,8 +314,9 @@ async def handle_activity(update, context, activity_name, icon):
         "start_timestamp": now.isoformat(), "end_time": None, "end_timestamp": None, "duration": None
     }
     if activity_name == "Break":
-        deadline = now.replace(hour=15, minute=0, second=0, microsecond=0)
-        activity["deadline"] = "03:00:00 PM"
+        # Break window is fixed at 12:00 PM - 01:00 PM; must be back by 1:00 PM
+        deadline = now.replace(hour=13, minute=0, second=0, microsecond=0)
+        activity["deadline"] = "01:00:00 PM"
         activity["deadline_timestamp"] = deadline.isoformat()
 
     if "activities" not in data[user_id]:
@@ -325,8 +327,8 @@ async def handle_activity(update, context, activity_name, icon):
     if activity_name == "Break":
         message = (
             f"☕ *BREAK STARTED*\n\n👤 PC:  *{pc_display}*\n\n📅 Date:  *{current_date}*\n\n"
-            f"⏰ Break Start:  *{current_time}*\n\n⏳ Break Duration:  *1 Hour*\n\n"
-            f"⏰ You must be back by:  *03:00:00 PM*\n\n"
+            f"⏰ Break Start:  *{current_time}*\n\n⏳ Break Window:  *12:00 PM \\- 01:00 PM*\n\n"
+            f"⏰ You must be back by:  *01:00:00 PM*\n\n"
             f"🔔 Please press  *💺 Back to Seat*  when you return\\."
         )
     elif activity_name == "Washroom":
@@ -360,12 +362,12 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = update.message.from_user
     user_id = str(user.id)
     data = load_data()
-    
+
     pc_number = get_user_pc(data, user_id)
     if not pc_number:
         await ask_registration(update, context)
         return
-    
+
     pc_display = escape_markdown(pc_number)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
@@ -412,7 +414,7 @@ async def handle_back_to_seat(update: Update, context: ContextTypes.DEFAULT_TYPE
         deadline_dt = datetime.fromisoformat(active["deadline_timestamp"])
         if now > deadline_dt:
             late_str = format_duration(int((now - deadline_dt).total_seconds()))
-            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n\\(Max allowed: 1 Hour\\)"
+            late_message = f"\n\n❗🔴 *LATE BY:  {late_str}* 🔴❗\n\\(Break window: 12:00 PM \\- 01:00 PM\\)"
             data[user_id]["activities"][active_index]["is_late"] = True
         else:
             late_message = "\n\n📌 Status:  *ON TIME* ✅"
@@ -451,12 +453,12 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     user_id = str(user.id)
     data = load_data()
-    
+
     pc_number = get_user_pc(data, user_id)
     if not pc_number:
         await ask_registration(update, context)
         return
-    
+
     pc_display = escape_markdown(pc_number)
     now = get_now()
     current_time = now.strftime("%I:%M:%S %p")
@@ -477,18 +479,18 @@ async def handle_off_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
             today_attendance = r
             break
 
-    off_time = now.replace(hour=21, minute=30, second=0, microsecond=0)
+    off_time = now.replace(hour=21, minute=0, second=0, microsecond=0)
     off_status = ""
     if now < off_time:
         early_str = format_duration(int((off_time - now).total_seconds()))
         off_status = (
-            f"\n\n❗🔴 *EARLY LEAVE* 🔴❗\n\n⏰ Off Work Time:  *09:30:00 PM*\n\n"
+            f"\n\n❗🔴 *EARLY LEAVE* 🔴❗\n\n⏰ Off Work Time:  *09:00:00 PM*\n\n"
             f"⏰ You Left At:  *{current_time}*\n\n⏳ Early By:  *{early_str}*"
         )
     elif now > off_time:
         over_str = format_duration(int((now - off_time).total_seconds()))
         off_status = (
-            f"\n\n⏰ *OVERTIME*\n\n⏰ Off Work Time:  *09:30:00 PM*\n\n"
+            f"\n\n⏰ *OVERTIME*\n\n⏰ Off Work Time:  *09:00:00 PM*\n\n"
             f"⏰ You Left At:  *{current_time}*\n\n⏳ Overtime:  *{over_str}*"
         )
     else:
@@ -563,7 +565,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = str(update.message.from_user.id)
     data = load_data()
-    
+
     # Check if user is awaiting PC registration
     if context.user_data.get("awaiting_pc", False):
         # Don't process button clicks as PC numbers
@@ -572,7 +574,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await handle_pc_registration(update, context)
         return
-    
+
     # Check if user is not registered and clicks a button
     if get_user_pc(data, user_id) is None:
         if text in ["🟢 Start Work", "🚻 Washroom", "🚬 Smoke", "☕ Break", "💺 Back to Seat", "🔴 Off Work"]:
@@ -582,7 +584,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # User typed something - treat as PC number
             await handle_pc_registration(update, context)
             return
-    
+
     # Normal button handling
     if text == "🟢 Start Work":
         await handle_start_work(update, context)
